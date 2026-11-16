@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Instrumentación y análisis de trazas con Phoenix</title>
+  <style>
+    @page { size: A4; margin: 14mm 14mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: #1c1917;
+      font-size: 11.5px;
+      line-height: 1.45;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    header {
+      border-bottom: 2px solid #1c1917;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }
+    .kicker {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #78716c;
+      margin: 0 0 4px;
+    }
+    h1 { font-size: 20px; margin: 0 0 6px; font-weight: 650; letter-spacing: -0.02em; }
+    h2 { font-size: 13px; margin: 16px 0 6px; font-weight: 650; }
+    p { margin: 0 0 8px; }
+    .lead { margin: 0; color: #44403c; }
+    .stats { display: flex; gap: 8px; margin: 14px 0 4px; }
+    .stat {
+      flex: 1;
+      border: 1px solid #e7e5e4;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #fafaf9;
+    }
+    .stat b { display: block; font-size: 16px; letter-spacing: -0.02em; }
+    .stat span { color: #57534e; font-size: 10.5px; }
+    table { border-collapse: collapse; width: 100%; margin: 6px 0 8px; }
+    th, td { border: 1px solid #e7e5e4; padding: 5px 7px; text-align: left; vertical-align: top; }
+    th { background: #f5f5f4; font-weight: 650; }
+    .si { color: #166534; }
+    .parcial { color: #9a3412; }
+    .arbol, .error {
+      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 10.5px;
+      line-height: 1.55;
+      background: #fafaf9;
+      border: 1px solid #e7e5e4;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 6px 0 8px;
+      white-space: pre;
+    }
+    .error { background: #fff7ed; border-color: #fed7aa; }
+    ul { margin: 4px 0 8px; padding-left: 18px; }
+    li { margin: 0 0 3px; }
+    .nota {
+      border-left: 3px solid #1c1917;
+      padding: 2px 0 2px 10px;
+      margin: 8px 0;
+    }
+    code {
+      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 10.5px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="kicker">Unidad 7.1 · Tienda Lumen</p>
+    <h1>Instrumentación y análisis de trazas con Phoenix</h1>
+    <p class="lead">Orquestador de la unidad 6 contra Phoenix local, proyecto tienda-lumen, en localhost:6006. El modelo es gemini-flash-lite-latest. En las trazas el proveedor lo nombra gemini-3.5-flash-lite. La búsqueda pasa por Chroma, colección politicas-lumen.</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><b>57,6 s</b><span>Grafo más largo. Casi todo es espera al modelo.</span></div>
+    <div class="stat"><b>0,46 s</b><span>Recuperación en esa misma traza.</span></div>
+    <div class="stat"><b>2,8 ms</b><span>Cálculo local del reembolso.</span></div>
+    <div class="stat"><b>0,0014 USD</b><span>Costo estimado. En free tier no se cobró.</span></div>
+  </div>
+
+  <h2>Las cinco consultas</h2>
+  <p>Las cinco cerraron con la regla de la base: hasta 10 días y hasta 20000 pesos.</p>
+  <table>
+    <tr><th>Caso</th><th>Decisión</th><th>¿Apoyada en la política?</th></tr>
+    <tr><td>14500 pesos, 12 días</td><td>No. Pasó el plazo de 10.</td><td class="si">Sí</td></tr>
+    <tr><td>8000 pesos, 3 días</td><td>Sí. Entra en plazo y en tope.</td><td class="si">Sí</td></tr>
+    <tr><td>25000 pesos, 5 días</td><td>No. El monto pasa el tope de 20000.</td><td class="si">Sí</td></tr>
+    <tr><td>18000 pesos, 10 días</td><td>Sí. 10 días entra y 18000 no pasa el tope.</td><td class="si">Sí</td></tr>
+    <tr><td>5000 pesos, 15 días</td><td>No. 15 días pasa el plazo de 10.</td><td class="parcial">La decisión sí. Una frase no.</td></tr>
+  </table>
+  <p class="nota">En la quinta, la síntesis dice: «El aporte del investigador sobre el estado sin uso falta». El documento recuperado sí dice que el producto no tiene que tener uso. Esa frase es una alucinación. El no al reembolso sigue siendo correcto, porque 15 es mayor que 10.</p>
+
+  <h2>Jerarquía en el dashboard</h2>
+  <p>Una consulta que termina bien queda así. El agente llama a la herramienta y al modelo.</p>
+  <div class="arbol">LangGraph
+  supervisor → ChatGoogleGenerativeAI
+  investigador → agent → ChatGoogleGenerativeAI
+               → buscar_documentos → VectorStoreRetriever
+  analista → agent → ChatGoogleGenerativeAI
+           → validar_reembolso
+  validar
+  sintesis → ChatGoogleGenerativeAI</div>
+  <p>chroma.buscar_politica es el span propio de la base. Adentro está EmbedContent, el embedding. En esta sesión ese span salió como traza raíz, al lado del grafo, no como hijo de buscar_documentos. El tiempo de la base igual está dentro del grafo, en VectorStoreRetriever.</p>
+
+  <h2>Qué tardó más</h2>
+  <p>El razonamiento más largo que sí terminó es el de 25000 pesos a los 5 días. Traza 891c187a. El grafo duró 57,6 s. El span suelto más lento es una llamada al modelo del analista: ChatGoogleGenerativeAI, 13,4 s, 496 tokens. La recuperación no es el cuello de botella.</p>
+  <ul>
+    <li>Las 8 llamadas al modelo suman 56,6 s.</li>
+    <li>VectorStoreRetriever tardó 0,46 s.</li>
+    <li>validar_reembolso tardó 2,8 ms.</li>
+  </ul>
+  <p>La recuperación más lenta de las consultas que sí cerraron fue 1,35 s (8000 pesos, 3 días). Sigue siendo mucho menos que cualquier llamada larga al modelo.</p>
+
+  <h2>Red y procesamiento</h2>
+  <p>La espera de red es ChatGoogleGenerativeAI y EmbedContent. Las dos salen de la máquina hacia la API de Gemini. El procesamiento local es validar_reembolso (0,3 ms a 2,8 ms) y el ruteo (ruta_supervisor, cerca de 1 ms).</p>
+  <p>Casi todo VectorStoreRetriever es la llamada de embeddings, no la búsqueda en Chroma. EmbedContent va de 0,4 s a 1,3 s. Cuando el span de la base falla a propósito, sin llegar a embeddings, dura unos 3 ms.</p>
+
+  <h2>Tokens y costo</h2>
+  <p>Traza 891c187a, ocho llamadas al modelo. AsyncGenerateContent repite los mismos tokens, así que no se suma dos veces.</p>
+  <table>
+    <tr><th></th><th>Tokens</th><th>Si se pagara</th></tr>
+    <tr><td>Entrada</td><td>2014</td><td>0,00060 USD</td></tr>
+    <tr><td>Salida</td><td>300</td><td>0,00075 USD</td></tr>
+    <tr><td>Total</td><td>2314</td><td>0,0014 USD</td></tr>
+  </table>
+  <p>Precio publicado de gemini-3.5-flash-lite: 0,30 USD por millón de entrada y 2,50 USD por millón de salida. La sesión corrió en el free tier. El 429 de Gemini lo dice explícito, así que esta corrida no se cobró.</p>
+  <p>La consulta de 5000 pesos a los 15 días hizo un trabajo parecido (1969 de entrada y 287 de salida) y terminó en 21,3 s. La de 57,6 s no razonó más: se quedó esperando la API.</p>
+
+  <h2>El fallo a propósito</h2>
+  <p>Después de las cinco, la búsqueda levantó <code>RuntimeError: Base de políticas no disponible</code> antes de tocar Chroma. En la traza 14948c78 (8,9 s) el error sube así:</p>
+  <div class="error">LangGraph ERROR
+  investigador ERROR
+    tools ERROR
+      buscar_documentos ERROR</div>
+  <p>El modelo del investigador había respondido bien (6,4 s, status OK). El fallo está en la herramienta, no en la generación. El span chroma.buscar_politica quedó en ERROR con el mismo mensaje, en unos 3 ms.</p>
+
+  <h2>Cómo bajarlo</h2>
+  <p>Cada caso bueno hace 8 llamadas al modelo en serie. Tres son del supervisor, y el camino ya está fijado: primero el investigador, después el analista, después cerrar. En la traza larga esas tres llamadas fueron 2,2 s, 11,5 s y 1,2 s.</p>
+  <p>Sacar el modelo del ruteo y dejar la regla que ya elige al que falta corta esa espera y unos 200 tokens de entrada por llamada. La política es un texto fijo: cachear el embedding evita repetir EmbedContent en cada pregunta.</p>
+</body>
+</html>
